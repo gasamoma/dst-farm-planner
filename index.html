@@ -2659,10 +2659,13 @@ var GAME_NAMES = {"en":{"Carrot":"Carrot","Corn":"Corn","Potato":"Potato","Toma 
  *   season     checks that land outside the crop's favourite seasons (0-4)
  *   nutrients  consumption events the tile could not fully cover (0-4)
  *   family     4 if fewer than 4 of the crop (itself included) are within
- *              1 tile, else 0
+ *              1 tile (FARM_PLANT_SAME_FAMILY_RADIUS = 4 units = 3 slot spacings), else 0.
+ *              Exactly 3 spacings away is treated as out of range: in game it sits right
+ *              on the edge, and hand-tilled spots are never exactly evenly spaced.
  *   water, attend   4 each if the player does not do them every stage
  * Seeds by total stress: <=6 -> 2, 7-11 -> 1, 12+ -> 0. Every plant gives 1 crop.
- * Giant: total stress <=1 and in season at every check (off-season plants never grow giant).
+ * Giant: total stress <=1 (game: farmplantstress.lua, "allow one mistake"), so one off-season
+ *   check alone does not rule it out; two or more do.
  *
  * Nutrients are per tile (no exchange between tiles). Each tile holds up to
  * 100 of each nutrient and starts at 20-40 (default here: 20, the worst case).
@@ -2921,7 +2924,7 @@ function makeEvaluator(geo, opts) {
       const s = day.off[ci] + nut[i] + fam + care;
       const sd = seedsFor(s);
       yld += vegW + seedW * sd; stressSum += s; used++; offSum += day.off[ci];
-      if (detail) plants.push({ slot: i, tile: tileOf[i], ci, season: day.off[ci], nutrient: nut[i], family: fam, care, stress: s, seeds: sd, giant: s <= 1 && day.off[ci] === 0 });
+      if (detail) plants.push({ slot: i, tile: tileOf[i], ci, season: day.off[ci], nutrient: nut[i], family: fam, care, stress: s, seeds: sd, giant: s <= 1 });
     }
     let tidy = 0;
     for (let i = 0; i < n; i++) {
@@ -3274,7 +3277,7 @@ function normalizeConfig(cfg = {}) {
     water: cfg.waterEveryStage ?? true, attend: cfg.attendEveryStage ?? true,
     vegW: cfg.cropWeight ?? 1, seedW: cfg.seedWeight ?? 1, balanceWeight: cfg.balanceWeight ?? 0,
     buffer: cfg.growthBuffer ?? 1.25,
-    familyTiles: cfg.familyRadiusTiles ?? 1, inclusive: cfg.familyRadiusInclusive ?? true,
+    familyTiles: cfg.familyRadiusTiles ?? 1, inclusive: cfg.familyRadiusInclusive ?? false,
     scanDays: cfg.scanDays ?? 10, iterations: cfg.iterations ?? 40000, seed: cfg.randomSeed ?? 1,
     fertilizersOnHand: cfg.fertilizersOnHand || null,
     // 'plant': plant off-season seeds when they pay off; 'keep': only plant crops in season for the whole growth
@@ -3848,7 +3851,7 @@ if (typeof self !== 'undefined') self.DSTCore = API;
       <b>${esc(cropName(p.ci))}</b> <span class="muted">${T('fromSeed', { seed: seedName(p.ci), t: letter(p.tile) })}</span>
       <div class="stress">${rows.map(([k, v, why]) => `<div class="srow"><span>${k}</span><span class="dots" aria-label="${esc(Tx('ofFour', { n: v }))}">${dots(v)}</span><span>${why}</span></div>`).join('')}${care}</div>
       <p class="outcome">${T('outcome', { s: p.stress, n: p.seeds })}${p.giant ? ' ' + T('outcomeGiant') : ''}</p>
-      ${p.season ? `<p class="hint">${T('offPart')}</p>` : ''}</div></div>`;
+      ${p.season >= 2 ? `<p class="hint">${T('offPart')}</p>` : ''}</div></div>`;
   }
   function highlight(res) {
     const g = res.geometry;
@@ -3860,7 +3863,7 @@ if (typeof self !== 'undefined') self.DSTCore = API;
       let kin = false;
       if (selected >= 0 && i !== selected && res.grid[i] === ci) {
         const r = Math.floor(i / g.cols), c = i % g.cols;
-        kin = (r - r0) * (r - r0) + (c - c0) * (c - c0) <= 9 + 1e-6;
+        kin = (r - r0) * (r - r0) + (c - c0) * (c - c0) < 9 - 1e-6;
       }
       el.classList.toggle('kin', kin);
     });
