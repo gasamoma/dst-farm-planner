@@ -3199,7 +3199,27 @@ function anneal(grid0, inv, evaluate, obj, day, jars0, iters, rng, T0 = 2.0, T1 
   return { grid: bestGrid, eval: best };
 }
 
-function optimizeDay(geo, inv, day, jars0, opts, iters, runs, seed, startGrid = null) {
+// Final clean-up: try every swap of two different spots (a crop and an empty spot counts too)
+// and keep any that makes the plan better. Annealing is random and can stop one swap short of a
+// tidier layout with the same harvest; this pass makes the result deterministic and tidy.
+function polish(grid0, evaluate, obj, day, jars0, maxPasses = 4) {
+  const grid = Int8Array.from(grid0), n = grid.length;
+  let cur = evaluate(grid, day, jars0, false);
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let improved = false;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      if (grid[i] === grid[j]) continue;
+      let tmp = grid[i]; grid[i] = grid[j]; grid[j] = tmp;
+      const e = evaluate(grid, day, jars0, false);
+      if (obj.better(e, cur)) { cur = e; improved = true; }
+      else { tmp = grid[i]; grid[i] = grid[j]; grid[j] = tmp; }
+    }
+    if (!improved) break;
+  }
+  return { grid, eval: cur };
+}
+
+function optimizeDay(geo, inv, day, jars0, opts, iters, runs, seed, startGrid = null, tidyUp = true) {
   const evaluate = makeEvaluator(geo, opts);
   const obj = makeObjective(geo, opts);
   const rng = mulberry32(seed);
@@ -3222,6 +3242,7 @@ function optimizeDay(geo, inv, day, jars0, opts, iters, runs, seed, startGrid = 
     }
     if (!best || obj.better(res.eval, best.eval)) best = res;
   }
+  if (tidyUp) best = polish(best.grid, evaluate, obj, day, jars0);
   best.detail = evaluate(best.grid, day, jars0, true);
   return best;
 }
@@ -3369,7 +3390,7 @@ function planFarm(cfg) {
   for (let d = 0; d <= C.scanDays; d++) {
     if (d === 0) { scan.push({ day: cal.t0 + 1, season: cal.seasonAt(cal.t0), yld: today.eval.yld, plants: today.eval.used }); continue; }
     const dc = dayContext(cal.t0 + d, cal, C.buffer);
-    const r = optimizeDay(geo, invFor(dc), dc, C.jars0, opts, Math.max(4000, Math.round(C.iterations / 5)), 1, C.seed + d, today.grid);
+    const r = optimizeDay(geo, invFor(dc), dc, C.jars0, opts, Math.max(4000, Math.round(C.iterations / 5)), 1, C.seed + d, today.grid, false);
     scan.push({ day: cal.t0 + d + 1, season: cal.seasonAt(cal.t0 + d), yld: r.eval.yld, plants: r.eval.used });
   }
 
@@ -3413,7 +3434,7 @@ function planFarm(cfg) {
       const add = balancingSeeds(left, day0, C.inv);
       if (add && add.some(q => q > 0)) {
         const inv2 = invFor(day0).map((q, ci) => q + add[ci]);
-        const r2 = optimizeDay(geo, inv2, day0, C.jars0, opts, Math.max(6000, Math.round(C.iterations / 3)), 2, C.seed + 101);
+        const r2 = optimizeDay(geo, inv2, day0, C.jars0, opts, Math.max(6000, Math.round(C.iterations / 3)), 2, C.seed + 101, null, false);
         const used2 = new Array(NC).fill(0);
         for (const ci of r2.grid) if (ci >= 0) used2[ci]++;
         const plantedLeft = left.reduce((a, q, ci) => a + Math.min(q, Math.max(0, used2[ci] - usedCounts[ci])), 0);
